@@ -146,5 +146,7 @@
   }
   window.addEventListener('error',function(ev){if(document.getElementById('loading')||document.querySelector('.loading'))showError('起動中にエラーが発生しました：'+(ev.message||'不明なエラー'));});
   var q=location.search||'';if(/[?&]reset=1/.test(q)){store.del(K.html);store.del(K.ver);}
-  start();
+  // 読み込みの途中で画面を差し替えると、iPhoneでは古い画面の下に付け足されてしまうため、読み込みが終わってから始める
+  function boot(){setTimeout(start,0);}
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);else boot();
 })();
