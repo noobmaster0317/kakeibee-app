@@ -5,6 +5,7 @@
  */
 (function(){
   'use strict';
+  window.__kbShell=true;
   var API=String(window.KAKEIBO_API_URL||'').trim();
   var K={token:'kb.token',user:'kb.user',html:'kb.bundle.html',ver:'kb.bundle.ver',device:'kb.device'};
   var screen=document.getElementById('screen');
@@ -22,8 +23,10 @@
   if('serviceWorker' in navigator&&location.protocol==='https:'){navigator.serviceWorker.register('sw.js').catch(function(){});}
 
   function api(body){
-    return fetch(API,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(body),cache:'no-store',credentials:'omit',referrerPolicy:'no-referrer'})
-      .then(function(r){return r.text();},function(){throw netError();})
+    var ctrl=window.AbortController?new AbortController():null,timedOut=false;
+    var timer=setTimeout(function(){timedOut=true;if(ctrl)ctrl.abort();},body.action==='bundle'?45000:30000);
+    return fetch(API,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(body),cache:'no-store',credentials:'omit',referrerPolicy:'no-referrer',signal:ctrl?ctrl.signal:undefined})
+      .then(function(r){clearTimeout(timer);return r.text();},function(){clearTimeout(timer);if(timedOut){var e=Error('サーバーからの応答がありませんでした（時間切れ）。電波の良い場所でもう一度お試しください。');e.code='TIMEOUT';throw e;}throw netError();})
       .then(function(t){var j;try{j=JSON.parse(t);}catch(e){var x=Error('サーバーから家計簿の返事がありませんでした。GASの「ホーム画面アプリ用」デプロイの設定（次のユーザーとして実行：自分／アクセスできるユーザー：全員）を確認してください。');x.code='CONFIG';throw x;}
         if(!j.ok){var err=Error(j.error||'エラーが発生しました。');err.code=j.code||'';throw err;}return j.result;});
   }
@@ -64,10 +67,18 @@
     };
     setTimeout(function(){code.focus();},300);
   }
-  function showLoading(text){screen.innerHTML='<div class="loading"><div class="ring"></div><div>'+esc(text||'家計簿を準備しています')+'</div></div>';}
+  var watchdog=0;
+  function showLoading(text){
+    screen.innerHTML='<div class="loading"><div class="ring"></div><div>'+esc(text||'家計簿を準備しています')+'</div><div id="slow" hidden style="max-width:320px"><p style="margin:8px 0 0">時間がかかっています。電波を確認して、もう一度お試しください。</p><button type="button" id="again">もう一度試す</button><button type="button" class="ghost" id="fresh">画面を取り直す</button></div></div>';
+    clearTimeout(watchdog);watchdog=setTimeout(function(){var el=document.getElementById('slow');if(el)el.hidden=false;},12000);
+    document.getElementById('again').onclick=function(){location.reload();};
+    document.getElementById('fresh').onclick=function(){store.del(K.html);store.del(K.ver);location.reload();};
+  }
   function showError(message){
-    screen.innerHTML='<div class="card"><img class="logo" src="icons/apple-touch-icon.png" alt=""><h1>開けませんでした</h1><p class="err" style="text-align:center">'+esc(message)+'</p><button type="button" id="retry">もう一度試す</button></div>';
+    screen.innerHTML='<div class="card"><img class="logo" src="icons/apple-touch-icon.png" alt=""><h1>開けませんでした</h1><p class="err" style="text-align:center">'+esc(message)+'</p><button type="button" id="retry">もう一度試す</button><button type="button" class="ghost" id="fresh">画面を取り直す</button><button type="button" class="ghost" id="repair">連携をやり直す</button></div>';
     document.getElementById('retry').onclick=start;
+    document.getElementById('fresh').onclick=function(){store.del(K.html);store.del(K.ver);start();};
+    document.getElementById('repair').onclick=function(){if(confirm('この端末の連携情報を消して、連携コードの入力からやり直しますか？')){store.del(K.token);store.del(K.html);store.del(K.ver);start();}};
   }
 
   // ---- 家計簿の画面へ切り替え ----
@@ -93,6 +104,11 @@
       }
       window.google={script:{run:runner(null,null),host:{close:function(){},setHeight:function(){},setWidth:function(){}}}};
       window.__kbPWA={unpair:function(){try{localStorage.removeItem(KEYS.token);}catch(e){}location.reload();}};
+      // 裏で新しい画面が出ていないか確認し、あれば保存（次に開いたときに反映）
+      setTimeout(function(){
+        fetch(API,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({action:'bundle',token:token,have:window.__kbBundleVer||''}),cache:'no-store',credentials:'omit',referrerPolicy:'no-referrer'})
+          .then(function(r){return r.json();}).then(function(j){if(j&&j.ok&&j.result&&!j.result.same&&j.result.html){try{localStorage.setItem(KEYS.html,j.result.html);localStorage.setItem(KEYS.ver,j.result.version);}catch(e){}}}).catch(function(){});
+      },4000);
       // 新しい画面が届いていれば、しばらく閉じていたあと表に戻ったときに入れ替える
       var hiddenAt=0;document.addEventListener('visibilitychange',function(){
         if(document.hidden){hiddenAt=Date.now();return;}
@@ -101,6 +117,10 @@
     }.toString()+')('+JSON.stringify(API)+','+JSON.stringify(K)+');</'+'script>';
   }
   function render(html,ver){
+    try{renderNow(html,ver);}catch(e){store.del(K.html);store.del(K.ver);showError('画面を表示できませんでした（'+(e&&e.message||e)+'）。');}
+  }
+  function renderNow(html,ver){
+    clearTimeout(watchdog);
     var head='<meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="家計簿"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="theme-color" content="#f6f8f8"><link rel="manifest" href="manifest.webmanifest"><link rel="apple-touch-icon" href="icons/apple-touch-icon.png"><link rel="icon" type="image/png" href="icons/favicon.png"><script>window.__kbBundleVer='+JSON.stringify(ver)+';</'+'script>'+shimSource();
     var out=/<head[^>]*>/i.test(html)?html.replace(/<head[^>]*>/i,function(m){return m+head;}):head+html;
     out=out.replace(/<base\s+target="_top"\s*\/?>/i,'');
@@ -115,7 +135,6 @@
     var cached=store.get(K.html),ver=store.get(K.ver);
     if(cached&&ver){
       // 前回の画面ですぐ起動し、裏で新しい画面が出ていないか確認（次に開いたときに反映）
-      fetchBundle(ver).then(function(r){if(!r.same&&r.html){store.set(K.html,r.html);store.set(K.ver,r.version);}}).catch(function(){});
       render(cached,ver);return;
     }
     showLoading();
@@ -125,5 +144,7 @@
         showError(e.message);
       });
   }
+  window.addEventListener('error',function(ev){if(document.getElementById('loading')||document.querySelector('.loading'))showError('起動中にエラーが発生しました：'+(ev.message||'不明なエラー'));});
+  var q=location.search||'';if(/[?&]reset=1/.test(q)){store.del(K.html);store.del(K.ver);}
   start();
 })();
