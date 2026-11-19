@@ -83,8 +83,8 @@
 
   // ---- 家計簿の画面へ切り替え ----
   // 画面の中で使う google.script.run を、GASのAPIへの通信に置き換える部品
-  function shimSource(){
-    return '<script>('+function(API,KEYS){
+  function shimCode(){
+    return '('+function(API,KEYS){
       var token=localStorage.getItem(KEYS.token);
       function lost(message){try{localStorage.removeItem(KEYS.token);}catch(e){}alert(message+'\n\nもう一度、連携コードを入力してください。');location.reload();}
       function call(fn,args){
@@ -114,17 +114,37 @@
         if(document.hidden){hiddenAt=Date.now();return;}
         if(hiddenAt&&Date.now()-hiddenAt>30*60e3&&localStorage.getItem(KEYS.ver)!==window.__kbBundleVer)location.reload();
       });
-    }.toString()+')('+JSON.stringify(API)+','+JSON.stringify(K)+');</'+'script>';
+    }.toString()+')('+JSON.stringify(API)+','+JSON.stringify(K)+');';
   }
   function render(html,ver){
     try{renderNow(html,ver);}catch(e){store.del(K.html);store.del(K.ver);showError('画面を表示できませんでした（'+(e&&e.message||e)+'）。');}
   }
+  // document.write は使わず、受け取った画面をDOMとして組み立て直す（iPhoneのSafariで確実に差し替えるため）
+  function freshScript(old,text){var n=document.createElement('script');if(old)for(var k=0;k<old.attributes.length;k++)n.setAttribute(old.attributes[k].name,old.attributes[k].value);n.text=text!=null?text:old.text;return n;}
+  function activate(node){
+    if(node.nodeType===1&&node.tagName==='SCRIPT'){var s=freshScript(node);node.parentNode.replaceChild(s,node);return;}
+    if(node.querySelectorAll){var list=node.querySelectorAll('script');for(var i=0;i<list.length;i++)list[i].parentNode.replaceChild(freshScript(list[i]),list[i]);}
+  }
   function renderNow(html,ver){
     clearTimeout(watchdog);
-    var head='<meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="家計簿"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="theme-color" content="#f6f8f8"><link rel="manifest" href="manifest.webmanifest"><link rel="apple-touch-icon" href="icons/apple-touch-icon.png"><link rel="icon" type="image/png" href="icons/favicon.png"><script>window.__kbBundleVer='+JSON.stringify(ver)+';</'+'script>'+shimSource();
-    var out=/<head[^>]*>/i.test(html)?html.replace(/<head[^>]*>/i,function(m){return m+head;}):head+html;
-    out=out.replace(/<base\s+target="_top"\s*\/?>/i,'');
-    document.open();document.write(out);document.close();
+    var doc=new DOMParser().parseFromString(html,'text/html');
+    var bases=doc.querySelectorAll('base');for(var b=0;b<bases.length;b++)bases[b].parentNode.removeChild(bases[b]);
+    var head=document.head,body=document.body;
+    // 外枠の見た目（style）と表示中の内容を片付ける。CSP・アイコン・ホーム画面用の設定は残す
+    Array.prototype.slice.call(head.children).forEach(function(n){
+      var keep=n.tagName==='LINK'||(n.tagName==='META'&&(n.getAttribute('http-equiv')||n.getAttribute('charset')!=null||/^(apple-|mobile-|theme-color|referrer)/.test(n.getAttribute('name')||'')));
+      if(!keep)head.removeChild(n);
+    });
+    while(body.firstChild)body.removeChild(body.firstChild);
+    Array.prototype.slice.call(body.attributes).forEach(function(at){body.removeAttribute(at.name);});
+    if(doc.documentElement.getAttribute('lang'))document.documentElement.setAttribute('lang',doc.documentElement.getAttribute('lang'));
+    document.title=doc.title||document.title;
+    window.__kbBundleVer=ver;
+    head.appendChild(freshScript(null,shimCode()));
+    Array.prototype.slice.call(doc.head.childNodes).forEach(function(n){var x=document.importNode(n,true);head.appendChild(x);activate(x);});
+    Array.prototype.slice.call(doc.body.attributes).forEach(function(at){body.setAttribute(at.name,at.value);});
+    Array.prototype.slice.call(doc.body.childNodes).forEach(function(n){var x=document.importNode(n,true);body.appendChild(x);activate(x);});
+    window.scrollTo(0,0);
   }
   function fetchBundle(have){return api({action:'bundle',token:store.get(K.token),have:have||''});}
 

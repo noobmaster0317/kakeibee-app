@@ -14,7 +14,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="icon" type="image/png" href="icons/favicon.png">
-<style>
+<style id="shell-style">
 :root{--teal:#00897b;--ink:#1d2d35;--muted:#6b7a83;--line:#e3e9ec;--alert:#d0533f}
 *{box-sizing:border-box}
 html,body{margin:0;height:100%}
@@ -50,7 +50,7 @@ button.ghost{background:transparent;color:var(--teal);margin-top:8px;font-size:1
 // app.js が読み込めないときの逃げ道（15秒たっても準備中のままなら案内を出す）
 setTimeout(function(){var l=document.getElementById('loading');if(l&&!window.__kbShell){l.insertAdjacentHTML('beforeend','<div style="max-width:320px"><p>アプリの部品を読み込めませんでした。電波を確認して、もう一度お試しください。</p><button type="button" onclick="location.reload()">もう一度試す</button></div>');}},15000);
 </script>
-<script src="config.js"></script>
-<script src="app.js"></script>
+<script src="config.js?v=4"></script>
+<script src="app.js?v=4"></script>
 </body>
 </html>
