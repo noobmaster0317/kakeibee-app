@@ -20,6 +20,9 @@
   function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
   function guessDevice(){if(/iPad/.test(ua)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1))return 'iPad';if(/iPhone/.test(ua))return 'iPhone';if(/Android/.test(ua))return 'Android';if(/Mac/.test(ua))return 'Mac';if(/Windows/.test(ua))return 'Windows';return '端末';}
 
+  // 起動を待たずに、家計簿のデータの取り寄せを先に始めておく（画面の組み立てと同時進行。端末には保存しない）
+  try{if(API&&store.get(K.token)&&store.get(K.html)&&!/[?&]reset=1/.test(location.search||'')){window.__kbPre=fetch(API,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({action:'call',token:store.get(K.token),fn:'getData',args:[]}),cache:'no-store',credentials:'omit',referrerPolicy:'no-referrer'});window.__kbPre.catch(function(){});}}catch(e){}
+
   if('serviceWorker' in navigator&&location.protocol==='https:'){navigator.serviceWorker.register('sw.js').catch(function(){});}
 
   function api(body){
@@ -88,7 +91,10 @@
       var token=localStorage.getItem(KEYS.token);
       function lost(message){try{localStorage.removeItem(KEYS.token);}catch(e){}alert(message+'\n\nもう一度、連携コードを入力してください。');location.reload();}
       function call(fn,args){
-        return fetch(API,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({action:'call',token:token,fn:fn,args:args}),cache:'no-store',credentials:'omit',referrerPolicy:'no-referrer'})
+        return handle(fetch(API,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({action:'call',token:token,fn:fn,args:args}),cache:'no-store',credentials:'omit',referrerPolicy:'no-referrer'}));
+      }
+      function handle(sent){
+        return sent
           .then(function(r){return r.text();},function(){throw Error(navigator.onLine===false?'インターネットにつながっていません。つながってからもう一度お試しください。':'通信できませんでした。電波の良い場所でもう一度お試しください。');})
           .then(function(t){var j;try{j=JSON.parse(t);}catch(e){throw Error('サーバーから家計簿の返事がありませんでした。時間をおいてもう一度お試しください。');}
             if(!j.ok){if(j.code==='AUTH'){lost(j.error);return new Promise(function(){});}throw Error(j.error||'エラーが発生しました。');}return j.result;});
@@ -99,7 +105,10 @@
           if(name==='withFailureHandler')return function(h){return runner(ok,h);};
           if(name==='withUserObject')return function(){return runner(ok,ng);};
           if(typeof name!=='string'||name==='then')return undefined;
-          return function(){var args=Array.prototype.slice.call(arguments);call(name,args).then(function(r){ok&&ok(r);},function(e){ng&&ng(e);});};
+          return function(){var args=Array.prototype.slice.call(arguments);
+            // 最初の読み込みは、起動直後に先に始めておいた取り寄せの結果を使う（通信に失敗していたら、改めて取り直す）
+            if(name==='getData'&&window.__kbPre){var pre=window.__kbPre;window.__kbPre=null;handle(pre).then(function(r){ok&&ok(r);},function(){call(name,args).then(function(r){ok&&ok(r);},function(e){ng&&ng(e);});});return;}
+            call(name,args).then(function(r){ok&&ok(r);},function(e){ng&&ng(e);});};
         }});
       }
       window.google={script:{run:runner(null,null),host:{close:function(){},setHeight:function(){},setWidth:function(){}}}};
